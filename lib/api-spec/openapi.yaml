@@ -10,6 +10,16 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Workspace overview operations
+  - name: projects
+    description: Project management operations
+  - name: tasks
+    description: Task management operations
+  - name: activity
+    description: Workspace activity operations
+  - name: copilot
+    description: AI-assisted workspace operations
 paths:
   /healthz:
     get:
@@ -24,6 +34,196 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get workspace dashboard
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List workspace projects
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+  /projects/{id}:
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Project not found
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Project deleted
+        "404":
+          description: Project not found
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: List workspace tasks
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Create a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "201":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+  /tasks/{id}:
+    patch:
+      operationId: updateTask
+      tags: [tasks]
+      summary: Update a task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdate"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Task not found
+  /activity:
+    get:
+      operationId: listActivity
+      tags: [activity]
+      summary: List recent workspace activity
+      responses:
+        "200":
+          description: Activity list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+  /copilot/messages:
+    post:
+      operationId: askCopilot
+      tags: [copilot]
+      summary: Ask DevFlow Copilot about the workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopilotRequest"
+      responses:
+        "200":
+          description: Copilot answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +233,294 @@ components:
           type: string
       required:
         - status
+    ChartPoint:
+      type: object
+      properties:
+        label:
+          type: string
+        value:
+          type: number
+      required: [label, value]
+    TaskCompletionPoint:
+      type: object
+      properties:
+        label:
+          type: string
+        completed:
+          type: number
+        created:
+          type: number
+      required: [label, completed, created]
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        user:
+          type: string
+        userInitials:
+          type: string
+        timestamp:
+          type: string
+      required: [id, kind, title, description, user, userInitials, timestamp]
+    Deadline:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        project:
+          type: string
+        dueDate:
+          type: string
+        daysLeft:
+          type: number
+      required: [id, title, project, dueDate, daysLeft]
+    GithubActivity:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+        repository:
+          type: string
+        author:
+          type: string
+        timestamp:
+          type: string
+      required: [id, kind, title, repository, author, timestamp]
+    Insight:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        tone:
+          type: string
+      required: [title, body, tone]
+    DashboardSummary:
+      type: object
+      properties:
+        totalProjects:
+          type: number
+        activeProjects:
+          type: number
+        completedTasks:
+          type: number
+        pendingTasks:
+          type: number
+        teamMembers:
+          type: number
+        productivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChartPoint"
+        taskCompletion:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskCompletionPoint"
+        deadlines:
+          type: array
+          items:
+            $ref: "#/components/schemas/Deadline"
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+        githubActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/GithubActivity"
+        insights:
+          type: array
+          items:
+            $ref: "#/components/schemas/Insight"
+      required:
+        - totalProjects
+        - activeProjects
+        - completedTasks
+        - pendingTasks
+        - teamMembers
+        - productivity
+        - taskCompletion
+        - deadlines
+        - recentActivity
+        - githubActivity
+        - insights
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        progress:
+          type: number
+        taskCount:
+          type: number
+        completedTaskCount:
+          type: number
+        members:
+          type: number
+        deadline:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        color:
+          type: string
+      required: [id, name, description, status, priority, progress, taskCount, completedTaskCount, members, deadline, tags, color]
+    ProjectInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        deadline:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+      required: [name, description, status, priority, deadline, tags]
+    ProjectUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        deadline:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        projectId:
+          type: string
+        projectName:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        assignee:
+          type: string
+        assigneeInitials:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        labels:
+          type: array
+          items:
+            type: string
+        comments:
+          type: number
+        estimate:
+          type: number
+      required: [id, title, description, projectId, projectName, status, priority, assignee, assigneeInitials, dueDate, labels, comments, estimate]
+    TaskInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        projectId:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        assignee:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        labels:
+          type: array
+          items:
+            type: string
+      required: [title, description, projectId, status, priority, assignee, dueDate, labels]
+    TaskUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        projectId:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        assignee:
+          type: string
+        dueDate:
+          type: ["string", "null"]
+        labels:
+          type: array
+          items:
+            type: string
+    CopilotRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          minLength: 1
+      required: [message]
+    CopilotResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        actions:
+          type: array
+          items:
+            type: string
+      required: [answer, sources, actions]
 

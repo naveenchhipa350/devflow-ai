@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
-  status: string;
+export interface Deadline {
+  id: string;
+  title: string;
+  project: string;
+  dueDate: string;
+  daysLeft: number;
 }

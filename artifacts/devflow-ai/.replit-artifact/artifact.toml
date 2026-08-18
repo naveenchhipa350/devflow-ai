@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "DevFlow AI"
+description = "An AI-powered developer collaboration workspace for managing projects, tasks, documentation, GitHub activity, and team insights in one focused SaaS dashboard."
+version = "1.0.0"
+id = "artifacts/devflow-ai"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18293
+
+[services.development]
+run = "pnpm --filter @workspace/devflow-ai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/devflow-ai", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/devflow-ai/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18293"
+BASE_PATH = "/"
