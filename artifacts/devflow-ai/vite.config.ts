@@ -1,6 +1,5 @@
 import path from 'path';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
@@ -31,7 +30,17 @@ export default defineConfig({
   base: basePath,
   plugins: [
     react(),
-    tailwindcss(),
+    ...(await (async () => {
+      try {
+        const m = await import('@tailwindcss/vite');
+        return [m.default()];
+      } catch (e) {
+        // Optional plugin failed to load (likely native bindings not installed). Continue without it.
+        // This keeps the dev server usable in environments where optional native packages are disabled.
+        console.warn("Optional plugin @tailwindcss/vite failed to load, continuing without it.");
+        return [];
+      }
+    })()),
     runtimeErrorOverlay(),
     ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined
