@@ -266,6 +266,16 @@ export const UpdateTaskResponse = zod.object({
 
 
 /**
+ * @summary Delete a task
+ */
+export const DeleteTaskParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteTaskResponse = zod.void()
+
+
+/**
  * @summary List recent workspace activity
  */
 export const ListActivityResponseItem = zod.object({

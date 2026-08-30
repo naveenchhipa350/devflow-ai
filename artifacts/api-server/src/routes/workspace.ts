@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { Router, type IRouter } from "express";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { activity, db, projects, tasks, type NewProject, type NewTask } from "@workspace/db";
 import {
   AskCopilotBody,
   AskCopilotResponse,
@@ -6,6 +9,8 @@ import {
   CreateProjectResponse,
   CreateTaskBody,
   CreateTaskResponse,
+  DeleteProjectParams,
+  DeleteTaskParams,
   GetDashboardResponse,
   ListActivityResponse,
   ListProjectsQueryParams,
@@ -20,251 +25,36 @@ import {
   UpdateTaskResponse,
 } from "@workspace/api-zod";
 
-type Project = {
-  id: string;
-  name: string;
-  description: string;
-  status: string;
-  priority: string;
-  progress: number;
-  taskCount: number;
-  completedTaskCount: number;
-  members: number;
-  deadline: string | null;
-  tags: string[];
-  color: string;
-};
+type ProjectRow = typeof projects.$inferSelect;
+type TaskRow = typeof tasks.$inferSelect;
+type ActivityRow = typeof activity.$inferSelect;
 
-type Task = {
-  id: string;
-  title: string;
-  description: string;
-  projectId: string;
-  projectName: string;
-  status: string;
-  priority: string;
-  assignee: string;
-  assigneeInitials: string;
-  dueDate: string | null;
-  labels: string[];
-  comments: number;
-  estimate: number;
-};
-
-type ActivityItem = {
-  id: string;
-  kind: string;
-  title: string;
-  description: string;
-  user: string;
-  userInitials: string;
-  timestamp: string;
-};
+type TaskWithProject = TaskRow & { projectName: string };
 
 const colors = ["#d7f75b", "#f38b6b", "#9a8cff", "#6bd4c7", "#f3c969"];
 
-let idSequence = 40;
-const nextId = (prefix: string) => `${prefix}-${idSequence++}`;
+const newId = (prefix: string) => `${prefix}-${randomUUID().slice(0, 8)}`;
 
-let projects: Project[] = [
-  {
-    id: "project-orbit",
-    name: "Orbit release",
-    description: "Coordinate the public launch of the new team workspace experience.",
-    status: "Active",
-    priority: "High",
-    progress: 68,
-    taskCount: 24,
-    completedTaskCount: 16,
-    members: 8,
-    deadline: "2026-08-28",
-    tags: ["Product", "Launch"],
-    color: "#d7f75b",
-  },
-  {
-    id: "project-lattice",
-    name: "Lattice API",
-    description: "Unify service contracts and make project data easier to build on.",
-    status: "Active",
-    priority: "Critical",
-    progress: 43,
-    taskCount: 31,
-    completedTaskCount: 13,
-    members: 5,
-    deadline: "2026-09-12",
-    tags: ["Platform", "API"],
-    color: "#9a8cff",
-  },
-  {
-    id: "project-signal",
-    name: "Signal insights",
-    description: "Give teams a clear view into velocity, delivery risk, and focus.",
-    status: "Planning",
-    priority: "Medium",
-    progress: 21,
-    taskCount: 18,
-    completedTaskCount: 4,
-    members: 4,
-    deadline: "2026-10-04",
-    tags: ["Analytics", "Research"],
-    color: "#6bd4c7",
-  },
-  {
-    id: "project-ember",
-    name: "Ember mobile",
-    description: "A companion experience for updates and lightweight task triage.",
-    status: "On Hold",
-    priority: "Low",
-    progress: 12,
-    taskCount: 9,
-    completedTaskCount: 1,
-    members: 3,
-    deadline: null,
-    tags: ["Mobile"],
-    color: "#f38b6b",
-  },
-];
+const initialsFor = (name: string) =>
+  name
+    .split(" ")
+    .map((part) => part[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
-let tasks: Task[] = [
-  {
-    id: "task-1",
-    title: "Map the first-run workspace experience",
-    description: "Turn the onboarding notes into a clear sequence for new teams.",
-    projectId: "project-orbit",
-    projectName: "Orbit release",
-    status: "In Progress",
-    priority: "High",
-    assignee: "Maya Chen",
-    assigneeInitials: "MC",
-    dueDate: "2026-08-22",
-    labels: ["Design", "Onboarding"],
-    comments: 7,
-    estimate: 5,
-  },
-  {
-    id: "task-2",
-    title: "Add request validation to project endpoints",
-    description: "Make malformed project input fail with useful messages.",
-    projectId: "project-lattice",
-    projectName: "Lattice API",
-    status: "Review",
-    priority: "Critical",
-    assignee: "Jon Bell",
-    assigneeInitials: "JB",
-    dueDate: "2026-08-20",
-    labels: ["Backend", "Security"],
-    comments: 4,
-    estimate: 3,
-  },
-  {
-    id: "task-3",
-    title: "Write the release note for Orbit",
-    description: "Summarize the product changes in a voice customers can act on.",
-    projectId: "project-orbit",
-    projectName: "Orbit release",
-    status: "Todo",
-    priority: "Medium",
-    assignee: "Maya Chen",
-    assigneeInitials: "MC",
-    dueDate: "2026-08-25",
-    labels: ["Content"],
-    comments: 2,
-    estimate: 2,
-  },
-  {
-    id: "task-4",
-    title: "Review the project activity data model",
-    description: "Check naming and event boundaries before the analytics work starts.",
-    projectId: "project-signal",
-    projectName: "Signal insights",
-    status: "Backlog",
-    priority: "Low",
-    assignee: "Ari Patel",
-    assigneeInitials: "AP",
-    dueDate: "2026-09-03",
-    labels: ["Analytics"],
-    comments: 0,
-    estimate: 4,
-  },
-  {
-    id: "task-5",
-    title: "Ship the repository activity card",
-    description: "Connect the latest commits and pull requests to the workspace view.",
-    projectId: "project-lattice",
-    projectName: "Lattice API",
-    status: "Done",
-    priority: "High",
-    assignee: "Jon Bell",
-    assigneeInitials: "JB",
-    dueDate: "2026-08-16",
-    labels: ["GitHub", "Frontend"],
-    comments: 9,
-    estimate: 5,
-  },
-  {
-    id: "task-6",
-    title: "Define the mobile notification strategy",
-    description: "Capture which workspace events should reach the companion app.",
-    projectId: "project-ember",
-    projectName: "Ember mobile",
-    status: "Todo",
-    priority: "Low",
-    assignee: "Noah Williams",
-    assigneeInitials: "NW",
-    dueDate: null,
-    labels: ["Mobile", "Research"],
-    comments: 1,
-    estimate: 3,
-  },
-];
-
-let activity: ActivityItem[] = [
-  {
-    id: "activity-1",
-    kind: "task",
-    title: "Maya moved a task to In Progress",
-    description: "Map the first-run workspace experience",
-    user: "Maya Chen",
-    userInitials: "MC",
-    timestamp: "12 min ago",
-  },
-  {
-    id: "activity-2",
-    kind: "github",
-    title: "Jon opened a pull request",
-    description: "Add validation for project updates",
-    user: "Jon Bell",
-    userInitials: "JB",
-    timestamp: "38 min ago",
-  },
-  {
-    id: "activity-3",
-    kind: "comment",
-    title: "Ari commented on Signal insights",
-    description: "The event boundary notes are ready for review.",
-    user: "Ari Patel",
-    userInitials: "AP",
-    timestamp: "1 hr ago",
-  },
-  {
-    id: "activity-4",
-    kind: "project",
-    title: "Noah joined Ember mobile",
-    description: "Project member access was updated",
-    user: "Noah Williams",
-    userInitials: "NW",
-    timestamp: "3 hrs ago",
-  },
-  {
-    id: "activity-5",
-    kind: "task",
-    title: "Maya completed a task",
-    description: "Audit launch checklist and owners",
-    user: "Maya Chen",
-    userInitials: "MC",
-    timestamp: "Yesterday",
-  },
-];
+const relativeTime = (value: Date): string => {
+  const seconds = Math.floor((Date.now() - value.getTime()) / 1000);
+  if (seconds < 45) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return value.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
 
 const githubActivity = [
   {
@@ -293,85 +83,160 @@ const githubActivity = [
   },
 ];
 
-const createActivity = (item: Omit<ActivityItem, "id">) => {
-  activity = [{ ...item, id: nextId("activity") }, ...activity].slice(0, 12);
+const productivity = [
+  { label: "Mon", value: 46 },
+  { label: "Tue", value: 58 },
+  { label: "Wed", value: 52 },
+  { label: "Thu", value: 71 },
+  { label: "Fri", value: 64 },
+  { label: "Sat", value: 78 },
+  { label: "Sun", value: 67 },
+];
+
+const taskCompletion = [
+  { label: "W1", completed: 18, created: 24 },
+  { label: "W2", completed: 29, created: 31 },
+  { label: "W3", completed: 24, created: 35 },
+  { label: "W4", completed: 41, created: 33 },
+  { label: "W5", completed: 37, created: 29 },
+  { label: "W6", completed: 49, created: 38 },
+];
+
+const insights = [
+  {
+    title: "Momentum is up",
+    body: "Your team completed 18% more work this week, with the strongest lift coming from Orbit release.",
+    tone: "positive",
+  },
+  {
+    title: "Review is the current bottleneck",
+    body: "4 tasks have been in Review for more than 24 hours. A focused review block could unlock the next release cut.",
+    tone: "attention",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Query helpers
+// ---------------------------------------------------------------------------
+
+const loadTaskStats = async () => {
+  const rows = await db
+    .select({
+      projectId: tasks.projectId,
+      status: tasks.status,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(tasks)
+    .groupBy(tasks.projectId, tasks.status);
+
+  const stats = new Map<string, { taskCount: number; completedTaskCount: number }>();
+  for (const row of rows) {
+    const current = stats.get(row.projectId) ?? { taskCount: 0, completedTaskCount: 0 };
+    current.taskCount += row.count;
+    if (row.status === "done") current.completedTaskCount += row.count;
+    stats.set(row.projectId, current);
+  }
+  return stats;
 };
 
-const projectWithStats = (project: Project): Project => {
-  const projectTasks = tasks.filter((task) => task.projectId === project.id);
-  const completedTaskCount = projectTasks.length
-    ? projectTasks.filter((task) => task.status === "Done").length
-    : project.completedTaskCount;
-  const taskCount = projectTasks.length || project.taskCount;
-  const progress = projectTasks.length
-    ? Math.round((completedTaskCount / taskCount) * 100)
-    : project.progress;
-  return { ...project, taskCount, completedTaskCount, progress };
+const projectResponse = (project: ProjectRow, stats?: { taskCount: number; completedTaskCount: number }) => {
+  const taskCount = stats?.taskCount ?? 0;
+  const completedTaskCount = stats?.completedTaskCount ?? 0;
+  const progress = taskCount > 0 ? Math.round((completedTaskCount / taskCount) * 100) : 0;
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    priority: project.priority,
+    progress,
+    taskCount,
+    completedTaskCount,
+    members: project.members,
+    deadline: project.deadline,
+    tags: project.tags,
+    color: project.color,
+  };
 };
 
-const buildDashboard = () => {
-  const completedTasks = tasks.filter((task) => task.status === "Done").length;
-  const pendingTasks = tasks.length - completedTasks;
-  const activeProjects = projects.filter((project) => project.status === "Active").length;
+const taskResponse = (task: TaskWithProject) => ({
+  id: task.id,
+  title: task.title,
+  description: task.description,
+  projectId: task.projectId,
+  projectName: task.projectName,
+  status: task.status,
+  priority: task.priority,
+  assignee: task.assignee,
+  assigneeInitials: initialsFor(task.assignee),
+  dueDate: task.dueDate,
+  labels: task.labels,
+  comments: task.comments,
+  estimate: task.estimate,
+});
 
-  return GetDashboardResponse.parse({
-    totalProjects: projects.length,
-    activeProjects,
-    completedTasks: completedTasks + 17,
-    pendingTasks: pendingTasks + 62,
-    teamMembers: 12,
-    productivity: [
-      { label: "Mon", value: 46 },
-      { label: "Tue", value: 58 },
-      { label: "Wed", value: 52 },
-      { label: "Thu", value: 71 },
-      { label: "Fri", value: 64 },
-      { label: "Sat", value: 78 },
-      { label: "Sun", value: 67 },
-    ],
-    taskCompletion: [
-      { label: "W1", completed: 18, created: 24 },
-      { label: "W2", completed: 29, created: 31 },
-      { label: "W3", completed: 24, created: 35 },
-      { label: "W4", completed: 41, created: 33 },
-      { label: "W5", completed: 37, created: 29 },
-      { label: "W6", completed: 49, created: 38 },
-    ],
-    deadlines: [
-      { id: "deadline-1", title: "Orbit release candidate", project: "Orbit release", dueDate: "Aug 28", daysLeft: 10 },
-      { id: "deadline-2", title: "API contract review", project: "Lattice API", dueDate: "Aug 20", daysLeft: 2 },
-      { id: "deadline-3", title: "Signal research readout", project: "Signal insights", dueDate: "Sep 03", daysLeft: 16 },
-    ],
-    recentActivity: activity.slice(0, 5),
-    githubActivity,
-    insights: [
-      {
-        title: "Momentum is up",
-        body: "Your team completed 18% more work this week, with the strongest lift coming from Orbit release.",
-        tone: "positive",
-      },
-      {
-        title: "Review is the current bottleneck",
-        body: "4 tasks have been in Review for more than 24 hours. A focused review block could unlock the next release cut.",
-        tone: "attention",
-      },
-    ],
+const activityResponse = (item: ActivityRow) => ({
+  id: item.id,
+  kind: item.kind,
+  title: item.title,
+  description: item.description,
+  user: item.user,
+  userInitials: item.userInitials,
+  timestamp: relativeTime(item.createdAt),
+});
+
+const loadTasksWithProjects = async (where?: ReturnType<typeof and>) => {
+  const rows = await db
+    .select({ task: tasks, projectName: projects.name })
+    .from(tasks)
+    .innerJoin(projects, eq(tasks.projectId, projects.id))
+    .where(where)
+    .orderBy(desc(tasks.createdAt));
+  return rows.map((row): TaskWithProject => ({ ...row.task, projectName: row.projectName }));
+};
+
+// ---------------------------------------------------------------------------
+// Activity recording
+// ---------------------------------------------------------------------------
+
+type DbClient = Pick<typeof db, "insert">;
+
+const recordActivity = async (
+  client: DbClient,
+  input: { kind: string; title: string; description: string; user?: string; userInitials?: string },
+) => {
+  await client.insert(activity).values({
+    id: newId("activity"),
+    kind: input.kind,
+    title: input.title,
+    description: input.description,
+    user: input.user ?? "You",
+    userInitials: input.userInitials ?? "YO",
   });
 };
 
-const initialsFor = (name: string) =>
-  name
-    .split(" ")
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+// ---------------------------------------------------------------------------
+// Copilot grounding
+// ---------------------------------------------------------------------------
 
-const getCopilotAnswer = (message: string) => {
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+type GroundedProject = ReturnType<typeof projectResponse>;
+type GroundedTask = ReturnType<typeof taskResponse>;
+
+const getCopilotAnswer = (
+  projects: GroundedProject[],
+  tasks: GroundedTask[],
+  message: string,
+) => {
   const prompt = message.toLowerCase();
-  const overdue = tasks.filter((task) => task.dueDate && task.dueDate < "2026-08-18" && task.status !== "Done");
-  const reviewTasks = tasks.filter((task) => task.status === "Review");
-  const nextTask = tasks.find((task) => task.status === "In Progress") ?? tasks.find((task) => task.status === "Todo");
+  const overdue = tasks.filter(
+    (task) => task.dueDate && task.dueDate < todayIso() && task.status !== "done",
+  );
+  const reviewTasks = tasks.filter((task) => task.status === "review");
+  const nextTask =
+    tasks.find((task) => task.status === "in_progress") ??
+    tasks.find((task) => task.status === "todo");
 
   if (prompt.includes("overdue")) {
     return {
@@ -402,173 +267,295 @@ const getCopilotAnswer = (message: string) => {
   }
 
   return {
-    answer: `I’m looking at ${projects.length} projects and ${tasks.length} tracked tasks. ${projects.filter((project) => project.status === "Active").length} projects are active, and the team has ${tasks.filter((task) => task.status === "Done").length} completed tasks in the current workspace slice. Ask me about overdue work, priorities, or review bottlenecks for a grounded answer.`,
+    answer: `I’m looking at ${projects.length} projects and ${tasks.length} tracked tasks. ${projects.filter((project) => project.status === "active").length} projects are active, and the team has ${tasks.filter((task) => task.status === "done").length} completed tasks in the current workspace slice. Ask me about overdue work, priorities, or review bottlenecks for a grounded answer.`,
     sources: ["Workspace dashboard", "Projects", "Task queue"],
     actions: ["Summarize the workspace", "Find overdue tasks", "Suggest next work"],
   };
 };
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
 const router: IRouter = Router();
 
-router.get("/dashboard", (req, res) => {
+router.get("/dashboard", async (req, res) => {
   req.log.info("Loading workspace dashboard");
-  res.json(buildDashboard());
+
+  const [projectRows, taskRows, recentActivity] = await Promise.all([
+    db.select().from(projects).orderBy(desc(projects.createdAt)),
+    db
+      .select({
+        id: tasks.id,
+        projectId: tasks.projectId,
+        status: tasks.status,
+        title: tasks.title,
+        assignee: tasks.assignee,
+        dueDate: tasks.dueDate,
+      })
+      .from(tasks),
+    db.select().from(activity).orderBy(desc(activity.createdAt)).limit(5),
+  ]);
+
+  const completedTasks = taskRows.filter((task) => task.status === "done").length;
+  const deadlines = projectRows
+    .filter((project) => project.deadline)
+    .map((project) => {
+      const due = new Date(`${project.deadline}T00:00:00`);
+      const daysLeft = Math.ceil((due.getTime() - Date.now()) / 86_400_000);
+      return {
+        id: `deadline-${project.id}`,
+        title: project.name,
+        project: project.name,
+        dueDate: due.toLocaleDateString("en-US", { month: "short", day: "2-digit" }),
+        daysLeft,
+      };
+    })
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+
+  res.json(
+    GetDashboardResponse.parse({
+      totalProjects: projectRows.length,
+      activeProjects: projectRows.filter((project) => project.status === "active").length,
+      completedTasks,
+      pendingTasks: taskRows.length - completedTasks,
+      teamMembers: new Set(taskRows.map((task) => task.assignee).filter(Boolean)).size || 1,
+      productivity,
+      taskCompletion,
+      deadlines,
+      recentActivity: recentActivity.map(activityResponse),
+      githubActivity,
+      insights,
+    }),
+  );
 });
 
-router.get("/projects", (req, res) => {
+router.get("/projects", async (req, res) => {
   const query = ListProjectsQueryParams.parse(req.query);
-  const filtered = query.status
-    ? projects.filter((project) => project.status === query.status)
-    : projects;
-  res.json(ListProjectsResponse.parse(filtered.map(projectWithStats)));
+  const rows = query.status
+    ? await db.select().from(projects).where(eq(projects.status, query.status)).orderBy(desc(projects.createdAt))
+    : await db.select().from(projects).orderBy(desc(projects.createdAt));
+  const stats = await loadTaskStats();
+  res.json(ListProjectsResponse.parse(rows.map((project) => projectResponse(project, stats.get(project.id)))));
 });
 
-router.post("/projects", (req, res) => {
+router.post("/projects", async (req, res) => {
   const input = CreateProjectBody.parse(req.body);
-  const project: Project = {
-    id: nextId("project"),
-    name: input.name,
-    description: input.description,
-    status: input.status,
-    priority: input.priority,
-    progress: 0,
-    taskCount: 0,
-    completedTaskCount: 0,
-    members: 1,
-    deadline: input.deadline,
-    tags: input.tags,
-    color: colors[projects.length % colors.length] ?? colors[0]!,
-  };
-  projects = [project, ...projects];
-  createActivity({
-    kind: "project",
-    title: "You created a project",
-    description: project.name,
-    user: "You",
-    userInitials: "YO",
-    timestamp: "Just now",
+
+  const created = await db.transaction(async (tx) => {
+    const newProject: NewProject = {
+      id: newId("project"),
+      name: input.name,
+      description: input.description,
+      status: input.status,
+      priority: input.priority,
+      deadline: input.deadline,
+      tags: input.tags,
+      members: 1,
+      color: colors[Math.floor(Math.random() * colors.length)] ?? colors[0]!,
+    };
+
+    const [row] = await tx.insert(projects).values(newProject).returning();
+    await recordActivity(tx, {
+      kind: "project",
+      title: "You created a project",
+      description: newProject.name,
+    });
+    return row!;
   });
-  res.status(201).json(CreateProjectResponse.parse(project));
+
+  res.status(201).json(CreateProjectResponse.parse(projectResponse(created)));
 });
 
-router.patch("/projects/:id", (req, res) => {
+router.patch("/projects/:id", async (req, res) => {
   const params = UpdateProjectParams.parse(req.params);
   const input = UpdateProjectBody.parse(req.body);
-  const index = projects.findIndex((project) => project.id === params.id);
-  if (index === -1) {
+
+  const existing = await db.select().from(projects).where(eq(projects.id, params.id)).limit(1);
+  if (existing.length === 0) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
-  const updated = { ...projects[index]!, ...input };
-  projects[index] = updated;
-  createActivity({
-    kind: "project",
-    title: "You updated a project",
-    description: updated.name,
-    user: "You",
-    userInitials: "YO",
-    timestamp: "Just now",
+
+  const set: Partial<Pick<ProjectRow, "name" | "description" | "status" | "priority" | "deadline" | "tags">> = {};
+  if (input.name !== undefined) set.name = input.name;
+  if (input.description !== undefined) set.description = input.description;
+  if (input.status !== undefined) set.status = input.status;
+  if (input.priority !== undefined) set.priority = input.priority;
+  if (input.deadline !== undefined) set.deadline = input.deadline;
+  if (input.tags !== undefined) set.tags = input.tags;
+
+  await db.transaction(async (tx) => {
+    await tx.update(projects).set(set).where(eq(projects.id, params.id));
+    await recordActivity(tx, {
+      kind: "project",
+      title: "You updated a project",
+      description: input.name ?? existing[0]!.name,
+    });
   });
-  res.json(UpdateProjectResponse.parse(projectWithStats(updated)));
+
+  const updated: ProjectRow = { ...existing[0]!, ...set };
+  const stats = await loadTaskStats();
+  res.json(UpdateProjectResponse.parse(projectResponse(updated, stats.get(updated.id))));
 });
 
-router.delete("/projects/:id", (req, res) => {
-  const id = UpdateProjectParams.parse(req.params).id;
-  const project = projects.find((item) => item.id === id);
-  if (!project) {
+router.delete("/projects/:id", async (req, res) => {
+  const params = DeleteProjectParams.parse(req.params);
+  const existing = await db.select().from(projects).where(eq(projects.id, params.id)).limit(1);
+  if (existing.length === 0) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
-  projects = projects.filter((item) => item.id !== id);
-  tasks = tasks.filter((task) => task.projectId !== id);
-  createActivity({
-    kind: "project",
-    title: "You deleted a project",
-    description: project.name,
-    user: "You",
-    userInitials: "YO",
-    timestamp: "Just now",
+
+  await db.transaction(async (tx) => {
+    await tx.delete(projects).where(eq(projects.id, params.id));
+    await recordActivity(tx, {
+      kind: "project",
+      title: "You deleted a project",
+      description: existing[0]!.name,
+    });
   });
+
   res.status(204).send();
 });
 
-router.get("/tasks", (req, res) => {
+router.get("/tasks", async (req, res) => {
   const query = ListTasksQueryParams.parse(req.query);
-  const filtered = tasks.filter((task) => {
-    return (!query.status || task.status === query.status) && (!query.projectId || task.projectId === query.projectId);
-  });
-  res.json(ListTasksResponse.parse(filtered));
+  const conditions = [];
+  if (query.status) conditions.push(eq(tasks.status, query.status));
+  if (query.projectId) conditions.push(eq(tasks.projectId, query.projectId));
+
+  const rows = await loadTasksWithProjects(conditions.length > 0 ? and(...conditions) : undefined);
+  res.json(ListTasksResponse.parse(rows.map(taskResponse)));
 });
 
-router.post("/tasks", (req, res) => {
+router.post("/tasks", async (req, res) => {
   const input = CreateTaskBody.parse(req.body);
-  const project = projects.find((item) => item.id === input.projectId);
-  if (!project) {
+
+  const project = await db.select().from(projects).where(eq(projects.id, input.projectId)).limit(1);
+  if (project.length === 0) {
     res.status(400).json({ error: "Project not found" });
     return;
   }
-  const task: Task = {
-    id: nextId("task"),
-    title: input.title,
-    description: input.description,
-    projectId: project.id,
-    projectName: project.name,
-    status: input.status,
-    priority: input.priority,
-    assignee: input.assignee,
-    assigneeInitials: initialsFor(input.assignee),
-    dueDate: input.dueDate,
-    labels: input.labels,
-    comments: 0,
-    estimate: 3,
-  };
-  tasks = [task, ...tasks];
-  createActivity({
-    kind: "task",
-    title: "You created a task",
-    description: task.title,
-    user: "You",
-    userInitials: "YO",
-    timestamp: "Just now",
+
+  const created = await db.transaction(async (tx) => {
+    const newTask: NewTask = {
+      id: newId("task"),
+      title: input.title,
+      description: input.description,
+      projectId: input.projectId,
+      status: input.status,
+      priority: input.priority,
+      assignee: input.assignee,
+      dueDate: input.dueDate,
+      labels: input.labels,
+      comments: 0,
+      estimate: 3,
+    };
+
+    const [row] = await tx.insert(tasks).values(newTask).returning();
+    await recordActivity(tx, {
+      kind: "task",
+      title: "You created a task",
+      description: newTask.title,
+    });
+    return row!;
   });
-  res.status(201).json(CreateTaskResponse.parse(task));
+
+  res
+    .status(201)
+    .json(CreateTaskResponse.parse(taskResponse({ ...created, projectName: project[0]!.name })));
 });
 
-router.patch("/tasks/:id", (req, res) => {
+router.patch("/tasks/:id", async (req, res) => {
   const params = UpdateTaskParams.parse(req.params);
   const input = UpdateTaskBody.parse(req.body);
-  const index = tasks.findIndex((task) => task.id === params.id);
-  if (index === -1) {
+
+  const current = await db.select().from(tasks).where(eq(tasks.id, params.id)).limit(1);
+  if (current.length === 0) {
     res.status(404).json({ error: "Task not found" });
     return;
   }
-  const current = tasks[index]!;
-  const project = input.projectId ? projects.find((item) => item.id === input.projectId) : undefined;
-  const updated: Task = {
-    ...current,
-    ...input,
-    projectName: project?.name ?? current.projectName,
-    assigneeInitials: initialsFor(input.assignee ?? current.assignee),
-  };
-  tasks[index] = updated;
-  createActivity({
-    kind: "task",
-    title: updated.status === current.status ? "You updated a task" : `Task moved to ${updated.status}`,
-    description: updated.title,
-    user: "You",
-    userInitials: "YO",
-    timestamp: "Just now",
+
+  const currentProject = await db.select().from(projects).where(eq(projects.id, current[0]!.projectId)).limit(1);
+  const currentProjectName = currentProject[0]?.name ?? "";
+
+  let nextProjectId = current[0]!.projectId;
+  let nextProjectName = currentProjectName;
+  if (input.projectId !== undefined) {
+    const project = await db.select().from(projects).where(eq(projects.id, input.projectId)).limit(1);
+    if (project.length === 0) {
+      res.status(400).json({ error: "Project not found" });
+      return;
+    }
+    nextProjectId = project[0]!.id;
+    nextProjectName = project[0]!.name;
+  }
+
+  const set: Partial<
+    Pick<TaskRow, "title" | "description" | "projectId" | "status" | "priority" | "assignee" | "dueDate" | "labels">
+  > = {};
+  if (input.title !== undefined) set.title = input.title;
+  if (input.description !== undefined) set.description = input.description;
+  if (input.projectId !== undefined) set.projectId = nextProjectId;
+  if (input.status !== undefined) set.status = input.status;
+  if (input.priority !== undefined) set.priority = input.priority;
+  if (input.assignee !== undefined) set.assignee = input.assignee;
+  if (input.dueDate !== undefined) set.dueDate = input.dueDate;
+  if (input.labels !== undefined) set.labels = input.labels;
+
+  const statusChanged = input.status !== undefined && input.status !== current[0]!.status;
+  await db.transaction(async (tx) => {
+    await tx.update(tasks).set(set).where(eq(tasks.id, params.id));
+    await recordActivity(tx, {
+      kind: "task",
+      title: statusChanged ? `Task moved to ${input.status}` : "You updated a task",
+      description: input.title ?? current[0]!.title,
+    });
   });
-  res.json(UpdateTaskResponse.parse(updated));
+
+  const updated: TaskRow = { ...current[0]!, ...set };
+  res.json(UpdateTaskResponse.parse(taskResponse({ ...updated, projectName: nextProjectName })));
 });
 
-router.get("/activity", (_req, res) => {
-  res.json(ListActivityResponse.parse(activity));
+router.delete("/tasks/:id", async (req, res) => {
+  const params = DeleteTaskParams.parse(req.params);
+  const current = await db.select().from(tasks).where(eq(tasks.id, params.id)).limit(1);
+  if (current.length === 0) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(tasks).where(eq(tasks.id, params.id));
+    await recordActivity(tx, {
+      kind: "task",
+      title: "You deleted a task",
+      description: current[0]!.title,
+    });
+  });
+
+  res.status(204).send();
+});
+
+router.get("/activity", async (_req, res) => {
+  const rows = await db.select().from(activity).orderBy(desc(activity.createdAt)).limit(50);
+  res.json(ListActivityResponse.parse(rows.map(activityResponse)));
 });
 
 router.post("/copilot/messages", async (req, res) => {
   const { message } = AskCopilotBody.parse(req.body);
-  const grounded = getCopilotAnswer(message);
+
+  const [projectRows, taskRows, recentActivity] = await Promise.all([
+    db.select().from(projects).orderBy(desc(projects.createdAt)),
+    loadTasksWithProjects(),
+    db.select().from(activity).orderBy(desc(activity.createdAt)).limit(8),
+  ]);
+
+  const stats = await loadTaskStats();
+  const groundedProjects = projectRows.map((project) => projectResponse(project, stats.get(project.id)));
+  const groundedTasks = taskRows.map(taskResponse);
+  const grounded = getCopilotAnswer(groundedProjects, groundedTasks, message);
 
   if (!process.env.OPENAI_API_KEY) {
     res.json(AskCopilotResponse.parse(grounded));
@@ -589,9 +576,9 @@ router.post("/copilot/messages", async (req, res) => {
           {
             role: "system",
             content: `You are DevFlow Copilot. Only use this workspace context and be explicit when the data is insufficient. Workspace context: ${JSON.stringify({
-              projects: projects.map(projectWithStats),
-              tasks,
-              activity: activity.slice(0, 8),
+              projects: groundedProjects,
+              tasks: groundedTasks,
+              activity: recentActivity.map(activityResponse),
             })}`,
           },
           { role: "user", content: message },

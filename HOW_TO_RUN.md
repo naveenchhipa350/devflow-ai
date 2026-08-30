@@ -24,10 +24,28 @@ That's it.
 
 Ports can be overridden with the `PORT` env variable. The frontend also accepts `BASE_PATH` (defaults to `/`).
 
+## Database (required)
+
+Projects, tasks, and activity are stored in PostgreSQL via Drizzle. Add a `DATABASE_URL` to the repository-root `.env` file (see `.env.example`) before starting:
+
+```bash
+# .env  (repo root)
+DATABASE_URL=postgresql://USERNAME:PASSWORD@HOST:5432/mydatabase?sslmode=require
+```
+
+Then generate and apply the Drizzle migration, and (optionally) load demo data:
+
+```bash
+pnpm --filter @workspace/db run db:generate   # create SQL from the schema (already committed)
+pnpm --filter @workspace/db run db:migrate    # apply migrations to the database
+pnpm --filter @workspace/db run db:seed       # idempotent demo data (projects/tasks/activity)
+```
+
+The API server refuses to start and print the exact fix if `DATABASE_URL` is missing.
+
 ## Optional
 
-- **OpenAI Copilot**: set `OPENAI_API_KEY` in your environment before starting. Without it, the Copilot uses built-in deterministic workspace answers.
-- **Database**: not required — data is in-memory. PostgreSQL/Drizzle is scaffolded under `lib/db`.
+- **OpenAI Copilot**: set `OPENAI_API_KEY` in your environment before starting. Without it, the Copilot uses built-in deterministic answers grounded on the persisted workspace data.
 
 ## Other useful commands
 

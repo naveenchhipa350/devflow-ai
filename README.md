@@ -2,7 +2,7 @@
 
 DevFlow AI is a full-stack developer workspace prototype for organizing projects, tasks, team activity, and AI-assisted project questions in one interface. The repository is structured as a pnpm monorepo with a React/Vite frontend, an Express API server, shared API schemas generated around an OpenAPI contract, and a Drizzle/PostgreSQL database package scaffold. It is designed as a foundation for a developer collaboration product and currently focuses on dashboard, project, task, activity, settings, and Copilot experiences rather than a complete production SaaS platform.
 
-> **Current implementation note:** The repository contains working frontend/API flows, but some infrastructure is still scaffolded. Project and task data are currently held in server memory, authentication is not implemented, and the database schema package does not yet define application tables. The AI Copilot can use OpenAI when `OPENAI_API_KEY` is configured and otherwise falls back to deterministic workspace-aware responses.
+> **Current implementation note:** The repository contains working frontend/API flows. Projects, tasks, and activity are persisted in PostgreSQL through Drizzle, backend auth is not implemented, and the AI Copilot can use OpenAI when `OPENAI_API_KEY` is configured and otherwise falls back to deterministic workspace-aware responses grounded on the real database records.
 
 > **Quick start:** see [HOW_TO_RUN.md](./HOW_TO_RUN.md) — `pnpm install && pnpm dev`, then open http://localhost:5173.
 
@@ -81,7 +81,7 @@ The API builds a context object containing current:
 That context is included in the Copilot system message so the model is instructed to answer from the available workspace data and to be explicit when the data is insufficient.
 
 ### Deterministic fallback
-Without `OPENAI_API_KEY`, Copilot does not call an external AI provider. Instead, the API evaluates the user's message against the current in-memory workspace data and provides grounded responses for supported questions, including:
+Without `OPENAI_API_KEY`, Copilot does not call an external AI provider. Instead, the API evaluates the user's message against the persisted workspace data and provides grounded responses for supported questions, including:
 
 - Overdue tasks
 - Next/prioritized work
@@ -126,7 +126,7 @@ These should be treated as future extensions rather than current features.
 | esbuild | API server bundling |
 | pnpm workspaces | Monorepo/package management |
 
-> PostgreSQL and Drizzle are present as database infrastructure, but application tables are not currently defined and the workspace routes currently use in-memory data.
+> PostgreSQL and Drizzle provide the persistence layer. Application tables (`projects`, `tasks`, `activity`) are defined under `lib/db/src/schema` with primary keys, foreign keys, timestamps, indexes, and check constraints. The workspace routes query these tables directly.
 
 ## 🏗️ System Architecture
 
@@ -138,7 +138,7 @@ flowchart LR
     F --> C[Generated React API Client]
     C --> A[Express API /api]
     A --> V[Zod Validation]
-    A --> M[In-memory Workspace Data]
+    A --> M[(PostgreSQL via Drizzle)]
     A --> O[OpenAI API<br/>optional]
     A --> L[Pino Logging]
     A --> D[Drizzle/PostgreSQL Package<br/>scaffold]
@@ -152,7 +152,7 @@ flowchart LR
 3. React Query/API client handles API communication.
 4. Requests reach the Express server under `/api`.
 5. Shared Zod schemas validate request and response data.
-6. Workspace routes read or mutate the current in-memory project/task/activity state.
+6. Workspace routes read from or write to PostgreSQL through Drizzle.
 7. Copilot requests optionally call OpenAI with workspace context.
 8. The API returns structured JSON to the frontend.
 9. The frontend renders the result.
@@ -242,7 +242,7 @@ DevFlow-AI/
 - `lib/api-spec` — OpenAPI source contract.
 - `lib/api-zod` — shared Zod API schemas/types.
 - `lib/api-client-react` — generated/client-side API package.
-- `lib/db` — Drizzle/PostgreSQL database package scaffold.
+- `lib/db` — Drizzle/PostgreSQL database package (schema, migrations, seed), source-exported.
 - `scripts` — workspace scripts.
 - `attached_assets` — repository asset location; no application screenshots were identified in the current tree.
 
@@ -253,7 +253,7 @@ DevFlow-AI/
 - Node.js 24 or a compatible Node.js version supported by the workspace.
 - pnpm.
 - An OpenAI API key only if you want live OpenAI-powered Copilot responses.
-- PostgreSQL is only needed once the database package is connected to real application data; the current routes do not require a database connection to run their in-memory data.
+- A reachable PostgreSQL database. The API reads and writes all project/task/activity data through PostgreSQL, so a connection is required.
 
 ### 1. Clone the repository
 
@@ -277,23 +277,24 @@ pnpm install
 
 ### 4. Environment variables
 
-The current API server reads one optional environment variable:
+Create a `.env` file at the repository root (see `.env.example`). At minimum it must include `DATABASE_URL`:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+DATABASE_URL=postgresql://USERNAME:PASSWORD@HOST:5432/mydatabase?sslmode=require
+OPENAI_API_KEY=your_openai_api_key_here   # optional — Copilot falls back to deterministic answers without it
 ```
-
-If the variable is omitted, the Copilot endpoint uses its built-in deterministic workspace response.
 
 ### 5. Database setup
 
-The repository includes a Drizzle/PostgreSQL package with a `push` script:
+Projects, tasks, and activity are persisted in PostgreSQL via Drizzle. From the repository root, generate (SQL is already committed) and apply the migration, then optionally load demo data:
 
 ```bash
-pnpm --filter @workspace/db run push
+pnpm --filter @workspace/db run db:generate   # create SQL from the schema (already committed)
+pnpm --filter @workspace/db run db:migrate    # apply migrations to the database
+pnpm --filter @workspace/db run db:seed       # idempotent demo data (projects/tasks/activity)
 ```
 
-However, the current database schema is only a scaffold and does not define application tables yet. The current workspace API therefore operates on in-memory data rather than persisted PostgreSQL records.
+The API server refuses to start if `DATABASE_URL` is missing and logs the exact fix.
 
 ### 6. Run the frontend
 
@@ -338,7 +339,7 @@ http://localhost:5000/api/healthz
 | Variable | Required | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | No | OpenAI API key used by the server-side DevFlow Copilot integration. Without it, Copilot falls back to deterministic workspace responses. |
-| `DATABASE_URL` | Not currently used by the application routes | The repository documentation identifies this as the PostgreSQL connection string for the Drizzle database package, but the current database schema is still a scaffold. |
+| `DATABASE_URL` | Yes | PostgreSQL connection string used by Drizzle for all project/task/activity persistence. The API server exits at startup if it is missing. |
 
 > Never commit real API keys or database credentials to Git.
 
@@ -348,7 +349,7 @@ http://localhost:5000/api/healthz
 
 1. The frontend loads the dashboard route.
 2. The frontend API layer requests `/api/dashboard`.
-3. The Express workspace router builds a dashboard response from the current in-memory projects, tasks, activity, and GitHub-style activity data.
+3. The Express workspace router builds a dashboard response from the persisted projects, tasks, activity, and GitHub-style activity data.
 4. Zod validates the response.
 5. The dashboard renders cards, charts, deadlines, activity, and insights.
 
@@ -357,7 +358,7 @@ http://localhost:5000/api/healthz
 1. A user opens Projects or Tasks.
 2. The frontend requests the corresponding API endpoint.
 3. The API validates query/body data with shared Zod schemas.
-4. The server reads or modifies its in-memory collections.
+4. The server reads from or writes to PostgreSQL through Drizzle.
 5. An activity record is added for relevant create/update/delete operations.
 6. The structured response is returned to the frontend.
 
@@ -485,11 +486,9 @@ pnpm --filter @workspace/api-server run build
 
 Before deploying this project as a production SaaS application, configure:
 
-- A persistent PostgreSQL database and real application schema.
-- A production-safe `DATABASE_URL`.
+- A production-safe `DATABASE_URL` (the app already persists to PostgreSQL via Drizzle).
 - `OPENAI_API_KEY` as a server-side secret when AI functionality is enabled.
 - Authentication and authorization.
-- Persistent storage instead of in-memory project/task/activity arrays.
 - CORS rules appropriate for the production frontend domain.
 - Production logging and monitoring.
 
@@ -507,7 +506,7 @@ The current implementation includes several useful foundations:
 
 Authentication and authorization are **not implemented** in the current repository. API endpoints are therefore not protected by user identity or workspace permissions.
 
-The current in-memory data model also means data is not persistent or isolated between authenticated users because authentication does not yet exist.
+Data is persisted in PostgreSQL, but it is not isolated between authenticated users because authentication does not yet exist.
 
 ## ⚡ Performance
 
@@ -547,6 +546,8 @@ No production-scale caching, database indexing strategy, background jobs, stream
 - [x] OpenAPI API specification
 - [x] Shared Zod API validation
 - [x] Drizzle/PostgreSQL package scaffold
+- [x] Define real PostgreSQL/Drizzle application tables
+- [x] Persist projects, tasks, and activity in PostgreSQL
 - [x] TypeScript typechecking
 - [x] Error boundary and toast UI foundations
 
@@ -554,8 +555,6 @@ No production-scale caching, database indexing strategy, background jobs, stream
 
 - [ ] Add real authentication and session management
 - [ ] Add role-based authorization
-- [ ] Define real PostgreSQL/Drizzle application tables
-- [ ] Persist projects, tasks, and activity in PostgreSQL
 - [ ] Connect the frontend to persistent data end-to-end
 - [ ] Add real GitHub OAuth/API integration instead of static GitHub-style activity data
 - [ ] Add persistent conversations for Copilot
@@ -612,8 +611,8 @@ DevFlow AI is technically interesting because it combines a modern TypeScript fr
 - The repository is a **pnpm workspace**, not a single Next.js application.
 - The frontend is **React + Vite**, not Next.js.
 - The backend is **Express 5** and is packaged separately from the frontend.
-- The current workspace data in `workspace.ts` is stored in memory, so changes are lost when the API server restarts.
-- The Drizzle/PostgreSQL package exists, but `lib/db/src/schema/index.ts` currently contains only schema scaffolding and no application tables.
+- The workspace data in `workspace.ts` is persisted to PostgreSQL through Drizzle (databases created/updated via `lib/db` migrations).
+- The Drizzle/PostgreSQL package defines `projects`, `tasks`, and `activity` tables under `lib/db/src/schema`.
 - There is currently no implemented authentication/authorization layer.
 - The Copilot integration is optional and requires `OPENAI_API_KEY` for live OpenAI responses.
 - The current Copilot implementation uses the OpenAI Chat Completions endpoint with `gpt-4o-mini` and falls back to local deterministic responses when the provider is unavailable.
