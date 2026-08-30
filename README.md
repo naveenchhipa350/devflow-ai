@@ -4,6 +4,8 @@ DevFlow AI is a full-stack developer workspace prototype for organizing projects
 
 > **Current implementation note:** The repository contains working frontend/API flows, but some infrastructure is still scaffolded. Project and task data are currently held in server memory, authentication is not implemented, and the database schema package does not yet define application tables. The AI Copilot can use OpenAI when `OPENAI_API_KEY` is configured and otherwise falls back to deterministic workspace-aware responses.
 
+> **Quick start:** see [HOW_TO_RUN.md](./HOW_TO_RUN.md) — `pnpm install && pnpm dev`, then open http://localhost:5173.
+
 ## ✨ Features
 
 ### Workspace dashboard
